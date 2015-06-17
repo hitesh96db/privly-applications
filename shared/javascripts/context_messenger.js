@@ -31,7 +31,7 @@
  *        their roles, even when the name cannot correctly
  *        represent the functionality.
  *
- *    - sendMessageTo(to, data)
+ *    - sendMessageTo(to, data, messenger)
  *        The `to` parameter is one of three values:
  *        BACKGROUND_SCRIPT, PRIVLY_APPLICATION, CONTENT_SCRIPT
  *
@@ -42,11 +42,18 @@
  *        JSON serializable. You need to serialize it if your platform
  *        message pathway doesn't support passing an object directly.
  *
- *    - setListener(callback)
+ *        The `messenger` parameter is the API object that provides the messaging
+ *        interface for the current platform.
+ *
+ *    - setListener(messenger)
+ *
+ *        The `messenger` parameter is the API object that provides the messaging
+ *        interface for the current platform.
+ *
  *        Write platform specific code to listen incoming messages if
- *        there are. You should call callback(data) after you receiving
- *        and unserializing incoming messages in your platform. The
- *        data parameter you passed to callback function should be
+ *        there are. You should call messageHandler(data, messenger(optional)) after you 
+ *        receiving and unserializing incoming messages in your platform. The
+ *        data parameter you passed to messageHandler function should be
  *        an object.
  *
  *    You can check out ChromeAdapter (Privly.message.adapter.Chrome)
@@ -57,15 +64,15 @@
  *
  *    Send message to the background script (or the extension on Android platform):
  *
- *        Privly.message.messageExtension(data)
+ *        Privly.message.messageExtension(data, messenger(optional))
  *
  *    Send message to all content scripts:
  *
- *        Privly.message.messageContentScripts(data)
+ *        Privly.message.messageContentScripts(data, messenger(optional))
  *
  *    Send message to all Privly application page:
  *
- *        Privly.message.messagePrivlyApplications(data)
+ *        Privly.message.messagePrivlyApplications(data, messenger(optional))
  *
  *    You can use any data type in the data parameter. The underlayer
  *    compatibility adapters can transparently serialize and unserialize it for you
@@ -93,7 +100,7 @@
  *    Your callback function will be called when there is an incoming message which is
  *    sent to the current context.
  *
- *    The signature of your callback function is: function(data, sendResponse)
+ *    The signature of your callback function is: function(data, sendResponse, messenger)
  *
  *    The `data` parameter is the data of the message.
  *    The `sendResponse` parameter is a callable function. You could use sendResponse(data)
@@ -102,6 +109,8 @@
  *    to send a response asynchronously (this will keep the message channel open to the other
  *    end until sendResponse is called)
  * 
+ *    The `messenger` parameter is the API object that provides the messaging interface for 
+ *    the current platform.
  * 
  * 
  *    Remove a message listener:
@@ -193,7 +202,7 @@ if (Privly === undefined) {
    * 'CONTENT_SCRIPT', 'BACKGROUND_SCRIPT', 'PRIVLY_APPLICATION'
    * @param  {Object} payload
    */
-  BaseAdapter.prototype.sendMessageTo = function (to, payload) {
+  BaseAdapter.prototype.sendMessageTo = function (to, payload, messenger) {
     console.warn('not implemented');
   };
 
@@ -202,7 +211,7 @@ if (Privly === undefined) {
    * 
    * @param {Function<payload>} callback
    */
-  BaseAdapter.prototype.setListener = function (callback) {
+  BaseAdapter.prototype.setListener = function (messenger) {
     console.warn('not implemented');
   };
 
@@ -246,7 +255,7 @@ if (Privly === undefined) {
   };
 
   /** @inheritdoc */
-  ChromeAdapter.prototype.sendMessageTo = function (to, payload) {
+  ChromeAdapter.prototype.sendMessageTo = function (to, payload, messenger) {
     if (to === 'BACKGROUND_SCRIPT') {
       chrome.extension.sendMessage(payload);
       return;
@@ -275,10 +284,10 @@ if (Privly === undefined) {
   };
 
   /** @inheritdoc */
-  ChromeAdapter.prototype.setListener = function (callback) {
+  ChromeAdapter.prototype.setListener = function (messenger) {
     chrome.runtime.onMessage.addListener(function (payload) {
       // for Chrome, we needn't check origin since it is always from a trust origin
-      callback(payload);
+      messageHandler(payload);
     });
   };
 
@@ -297,7 +306,14 @@ if (Privly === undefined) {
 
   /** @inheritdoc */
   FirefoxAdapter.isPlatformMatched = function () {
-    return (typeof chrome === 'undefined' && window.location.href.indexOf('chrome://') === 0);
+
+    validContext = ["BACKGROUND_SCRIPT", "CONTENT_SCRIPT",
+                    "PRIVLY_APPLICATIONS"]
+    if (validContext.indexOf(FirefoxAdapter.prototype.getContextName()) !== -1) {
+      return true;
+    }
+    // unknown context, possibly not in Firefox.
+    return false;
   };
 
   /** @inheritdoc */
@@ -309,9 +325,45 @@ if (Privly === undefined) {
   FirefoxAdapter.prototype.getPlatformName = function () {
     return 'FIREFOX';
   };
+
+  /** @inheritdoc */
+  FirefoxAdapter.prototype.getContextName = function () {
+
+    if (typeof require !== "undefined") {
+      return "BACKGROUND_SCRIPT";
+    }
+    else if (typeof self !== "undefined") {
+      if (typeof self.port !== "undefined") {
+        return "CONTENT_SCRIPT";
+      }
+    }
+    else if (typeof window !== "undefined") {
+      if (window.location.href.indexOf("chrome://") === 0) {
+        return "PRIVLY_APPLICATION";
+      }
+    }
+    else {
+      return "UNKNOWN_CONTEXT";
+    }
+  };
+
+  /** @inheritdoc */
+  FirefoxAdapter.prototype.sendMessageTo = function (to, data, messenger) {
+    if ((to === "BACKGROUND_SCRIPT" || to === "CONTENT_SCRIPT") && (typeof messenger !== "undefined")) {
+      messenger.port.emit("PRIVLY", data);
+    }
+  };
+
+  /** @inheritdoc */
+  FirefoxAdapter.prototype.setListener = function (messenger) {
+    if (typeof messenger !== "undefined") {
+      messenger.port.on("PRIVLY", function(message) {
+        messageHandler(message, messenger);
+      });
+    }
+  };
+
   Privly.message.adapter.Firefox = FirefoxAdapter;
-
-
 
 
   /**
@@ -349,7 +401,7 @@ if (Privly === undefined) {
   };
 
   /** @inheritdoc */
-  SafariAdapter.prototype.sendMessageTo = function (to, payload) {
+  SafariAdapter.prototype.sendMessageTo = function (to, payload, messenger) {
     if (to === 'BACKGROUND_SCRIPT') {
       safari.self.tab.dispatchMessage(payload);
       return;
@@ -374,15 +426,15 @@ if (Privly === undefined) {
   };
 
   /** @inheritdoc */
-  SafariAdapter.prototype.setListener = function (callback) {
+  SafariAdapter.prototype.setListener = function (messenger) {
     if (this.getContextName() === 'BACKGROUND_SCRIPT') {
       safari.application.addEventListener("message", function(payload) {
-        callback(payload);
+        messageHandler(payload);
       }, true);
     }
     if (this.getContextName() === 'CONTENT_SCRIPT') {
       safari.self.addEventListener("message", function(payload) {
-        callback(payload);
+        messageHandler(payload);
       }, true);
     }
   };
@@ -401,10 +453,13 @@ if (Privly === undefined) {
 
   /** @inheritdoc */
   IOSAdapter.isPlatformMatched = function () {
-    return (
-      (navigator.userAgent.indexOf('iPhone') >= 0 || navigator.userAgent.indexOf('iPad') >= 0)
-      && navigator.userAgent.indexOf('Safari') === -1
-    );
+    if (typeof navigator !== "undefined") {
+      return (
+        (navigator.userAgent.indexOf('iPhone') >= 0 || navigator.userAgent.indexOf('iPad') >= 0)
+        && navigator.userAgent.indexOf('Safari') === -1
+      );
+    }
+    return false;
   };
 
   /** @inheritdoc */
@@ -423,7 +478,7 @@ if (Privly === undefined) {
   };
 
   /** @inheritdoc */
-  IOSAdapter.prototype.sendMessageTo = function (to, data) {
+  IOSAdapter.prototype.sendMessageTo = function (to, data, messenger) {
     if (to === 'BACKGROUND_SCRIPT') {
       // TODO: the data here encapsuled some other infomation
       // iOS client side should handle this
@@ -476,7 +531,7 @@ if (Privly === undefined) {
   };
 
   /** @inheritdoc */
-  AndroidAdapter.prototype.sendMessageTo = function (to, data) {
+  AndroidAdapter.prototype.sendMessageTo = function (to, data, messenger) {
     if (to === 'BACKGROUND_SCRIPT') {
       // TODO: the data here encapsuled some other infomation
       // Android client side should handle this
@@ -522,7 +577,7 @@ if (Privly === undefined) {
   };
 
   /** @inheritdoc */
-  HostedAdapter.prototype.sendMessageTo = function (to, data) {
+  HostedAdapter.prototype.sendMessageTo = function (to, data, messenger) {
     if (to === 'BACKGROUND_SCRIPT') {
       // Don't send these messages in the hosted environment since the
       // extension is not there.
@@ -596,9 +651,12 @@ if (Privly === undefined) {
    * 'CONTENT_SCRIPT', 'BACKGROUND_SCRIPT', 'PRIVLY_APPLICATION'
    * @param  {Any} data
    *
+   * @param {Object} messenger the API object that provides the messaging
+   *                           interface for the current platform.
+   *
    * @return {Promise<response>}
    */
-  Privly.message.sendMessageTo = function (to, data) {
+  Privly.message.sendMessageTo = function (to, data, messenger) {
     // generate a unique id for this message
     var msgId = Privly.message.contextId + '.' + (++Privly.message._messageIdCounter).toString(16) + '.' + Date.now().toString(16);
 
@@ -608,7 +666,7 @@ if (Privly === undefined) {
       from: Privly.message.currentAdapter.getContextName(),
       to: to,
       id: msgId
-    });
+    }, messenger);
 
     return new Promise(function (resolve) {
       Privly.message._responsePromiseResolvers[msgId] = resolve;
@@ -621,11 +679,14 @@ if (Privly === undefined) {
    *
    * @param {Any} data The value of the message being sent to the extension.
    *
+   * @param {Object} messenger the API object that provides the messaging
+   *                           interface for the current platform.
+   *
    * @return {Promise<response>}
    *
    */
-  Privly.message.messageExtension = function (data) {
-    return Privly.message.sendMessageTo('BACKGROUND_SCRIPT', data);
+  Privly.message.messageExtension = function (data, messenger) {
+    return Privly.message.sendMessageTo('BACKGROUND_SCRIPT', data, messenger);
   };
 
   /**
@@ -634,10 +695,13 @@ if (Privly === undefined) {
    *
    * @param {Any} data The value of the message being sent to the content script.
    *
+   * @param {Object} messenger the API object that provides the messaging
+   *                           interface for the current platform.
+   *
    * @return {Promise<response>}
    */
-  Privly.message.messageContentScripts = function (data) {
-    return Privly.message.sendMessageTo('CONTENT_SCRIPT', data);
+  Privly.message.messageContentScripts = function (data, messenger) {
+    return Privly.message.sendMessageTo('CONTENT_SCRIPT', data, messenger);
   };
 
   /**
@@ -645,10 +709,13 @@ if (Privly === undefined) {
    * 
    * @param {Any} data the data to message to all the Privly Applications.
    *
+   * @param {Object} messenger the API object that provides the messaging
+   *                           interface for the current platform.
+   *
    * @return {Promise<response>}
    */
-  Privly.message.messagePrivlyApplications = function (data) {
-    return Privly.message.sendMessageTo('PRIVLY_APPLICATION', data);
+  Privly.message.messagePrivlyApplications = function (data, messenger) {
+    return Privly.message.sendMessageTo('PRIVLY_APPLICATION', data, messenger);
   };
 
   /**
@@ -662,10 +729,19 @@ if (Privly === undefined) {
   /**
    * Adds a listener to the message listener list.
    * 
-   * @param {Function<data, sendResponse>} listener accepts an object
+   * @param {Function<data, sendResponse, messenger>} listener accepts an object
    * containing the message
+   *
+   * @param {Object} messenger the API object that provides the messaging
+   *                           interface for the current platform.
+   *
    */
-  Privly.message.addListener = function (listener) {
+  Privly.message.addListener = function (listener, messenger) {
+
+    if (typeof messenger !== "undefined") {    
+      Privly.message.currentAdapter.setListener(messenger);
+    }
+
     if (Privly.message.listeners.indexOf(listener) === -1) {
       Privly.message.listeners.push(listener);
     }
@@ -674,7 +750,7 @@ if (Privly === undefined) {
   /**
    * Remove a listener from the message listener list.
    * 
-   * @param  {Function<data, sendResponse>} listener
+   * @param  {Function<data, sendResponse, messenger>} listener
    */
   Privly.message.removeListener = function (listener) {
     var index = Privly.message.listeners.indexOf(listener);
@@ -683,10 +759,18 @@ if (Privly === undefined) {
     }
   };
 
-  // Add message listener. this message listener will
-  // handle all raw messages received and forward to the
-  // user specified listeners or a response callback function.
-  Privly.message.currentAdapter.setListener(function (payload) {
+  /**
+   * This handler will be called when a raw message is received and 
+   * then calls all the user specified listeners or a response callback
+   * function. This is called from the Adapters setListener().
+   *
+   * @param {Object} payload the Message data object received.
+   *
+   * @param {Object} messenger the API object that provides the messaging
+   *                           interface for the current platform.
+   *
+   */
+  var messageHandler = function (payload, messenger) {
     var fn, i;
 
     // we may receive messages that are not intended to
@@ -703,7 +787,7 @@ if (Privly === undefined) {
       // multiple listeners want to send response.
       var responseSent = false;
 
-      var sendResponse = function (data) {
+      var sendResponse = function (data, messagingAPI) {
         if (responseSent) {
           return;
         }
@@ -712,7 +796,7 @@ if (Privly === undefined) {
           body: data,
           type: 'RESPONSE',
           id: payload.id
-        });
+        }, messagingAPI);
         responseSent = true;
       };
 
@@ -722,7 +806,7 @@ if (Privly === undefined) {
       var preserveChannel = false;
       for (i = 0; i < Privly.message.listeners.length; i++) {
         fn = Privly.message.listeners[i];
-        if (fn(payload.body, sendResponse) === true) {
+        if (fn(payload.body, sendResponse, messenger) === true) {
           preserveChannel = true;
         }
       }
@@ -731,7 +815,7 @@ if (Privly === undefined) {
       // will be sent, we still send a response message
       // to close the channel
       if (!responseSent && !preserveChannel) {
-        sendResponse(null);
+        sendResponse(null, messenger);
       }
       return;
     }
@@ -745,7 +829,9 @@ if (Privly === undefined) {
       }
       return;
     }
-  });
+  };
+
+  Privly.message.currentAdapter.setListener();
 
   // Setup a built-in ping-pong listener, mainly for testing and debuging purpose.
   // Any ping message send to this context will receive a pong response.
@@ -791,5 +877,9 @@ if (Privly === undefined) {
     });
   } catch (ignore) {
   }
-
 }());
+
+// CommonJS Module
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports.contextMessenger = Privly.message;
+} 
