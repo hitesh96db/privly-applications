@@ -47,13 +47,14 @@ var privlyExtension = {
     message["handler"] = handler;
     message["data"] = data;
     
+    var platform = privlyNetworkService.platformName();
     // Platform specific messaging
-    if (privlyNetworkService.platformName() === "CHROME") {
+    if (platform === "CHROME") {
       chrome.extension.sendMessage(
         message,
         privlyExtension.messageHandler);
     } else if(handler === "privlyUrl" && 
-              privlyNetworkService.platformName() === "IOS") {
+              platform === "IOS") {
       var iOSurl = "js-frame:" + data;
       var iframe = document.createElement("IFRAME");
       iframe.setAttribute("src", iOSurl);
@@ -63,10 +64,10 @@ var privlyExtension = {
       iframe.parentNode.removeChild(iframe);
       iframe = null;
     } else if(handler === "privlyUrl" && 
-              privlyNetworkService.platformName() === "ANDROID") {
+              platform === "ANDROID") {
       androidJsBridge.receiveNewPrivlyURL(data);
     } else {
-      
+
       // fallback is to fire an event that an extension may be able to capture
       var element = document.createElement("privlyEventSender");
       element.setAttribute("data-message-body", JSON.stringify(message));
