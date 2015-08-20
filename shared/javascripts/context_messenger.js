@@ -178,7 +178,8 @@ if (Privly === undefined) {
    * @return {String}
    */
   BaseAdapter.prototype.getPlatformName = function () {
-    throw new Error('Not implemented');
+    console.warn('getPlatformName is called but is not implemented');
+    return 'BaseAdapter';
   };
 
   /**
@@ -190,7 +191,8 @@ if (Privly === undefined) {
    * 'PRIVLY_APPLICATION': The privly application
    */
   BaseAdapter.prototype.getContextName = function () {
-    throw new Error('Not implemented');
+    console.warn('getContextName is called but is not implemented (current adapter: %s)', this.getPlatformName());
+    return 'PRIVLY_APPLICATION';
   };
 
   /**
@@ -201,7 +203,7 @@ if (Privly === undefined) {
    * @param  {Object} payload
    */
   BaseAdapter.prototype.sendMessageTo = function (to, payload) {
-    console.warn('not implemented');
+    console.warn('sendMessageTo is called but is not implemented (current adapter: %s)', this.getPlatformName());
   };
 
   /**
@@ -210,7 +212,7 @@ if (Privly === undefined) {
    * @param {Function<payload>} callback
    */
   BaseAdapter.prototype.setListener = function (callback) {
-    console.warn('not implemented');
+    console.warn('setListener is called but is not implemented (current adapter: %s)', this.getPlatformName());
   };
 
   Privly.message.adapter.Base = BaseAdapter;
@@ -245,7 +247,7 @@ if (Privly === undefined) {
   ChromeAdapter.prototype.getContextName = function () {
     if (window.document.getElementById('is-background-script') !== null) {
       return 'BACKGROUND_SCRIPT';
-    } else if (window.location.href.indexOf(window.location.origin + '/privly-applications') === 0) {
+    } else if (window.location.href.indexOf('chrome-extension://' + window.location.host + '/privly-applications/') === 0) {
       return 'PRIVLY_APPLICATION';
     } else {
       return 'CONTENT_SCRIPT';
@@ -263,7 +265,7 @@ if (Privly === undefined) {
       chrome.tabs.query({}, function (tabs) {
         tabs.forEach(function (tab) {
           // Don't message Privly Applications
-          if (tab.url.indexOf('chrome') !== 0) {
+          if (tab.url.indexOf('chrome') === -1) {
             chrome.tabs.sendMessage(tab.id, payload);
           }
         });
@@ -271,9 +273,12 @@ if (Privly === undefined) {
       return;
     }
     if (to === 'PRIVLY_APPLICATION') {
-      // Send message to all content scripts
+      // Send message to all privly applications
       chrome.tabs.query({}, function (tabs) {
         tabs.forEach(function (tab) {
+          // Privly applications may stay inside iframes, so we just send message
+          // to tabs. Those messages will be received by content scripts as well,
+          // but it doesn't matter. The top layer would filter messages.
           chrome.tabs.sendMessage(tab.id, payload);
         });
       });
@@ -736,6 +741,12 @@ if (Privly === undefined) {
       return;
     }
   };
+
+  /** @inheritdoc */
+  HostedAdapter.prototype.setListener = function () {
+    return;
+  };
+
   Privly.message.adapter.Hosted = HostedAdapter;
 
 

@@ -19,9 +19,7 @@
  *
  *    Privly.glyph.getGlyphDOM()
  *
- *    A `table` node will be returned. If you want to show
- *    it correctly, you also need some style rules. See tooltip.js
- *    for details.
+ *    A `canvas` node will be returned.
  *
  * To regenerate a new glyph for the current user:
  *
@@ -123,61 +121,54 @@ if (Privly === undefined) {
    * Constructs the user's security glyph, which indicates whether the
    * injected content is trusted.
    *
-   * @return {Node} A table element containing the glyph.
-   *
+   * @param {int} size The width and height of the image
+   * @return {Node} A canvas element containing the glyph.
    */
-  Privly.glyph.getGlyphDOM = function () {
+  Privly.glyph.getGlyphDOM = function (size) {
+    if (size === undefined) {
+      size = 30;
+    }
     // Generate a new glyph if not exist
     var glyph = Privly.options.getGlyph();
     if (glyph === null) {
       glyph = Privly.glyph.generateGlyph();
     }
 
-    // Construct the 5x5 table that will represent the glyph.
-    // Its 3rd column is the axis of symmetry
-    var table = document.createElement('table');
-    table.setAttribute('class', 'glyph_table');
-    table.setAttribute('dir', 'ltr');
-    table.setAttribute('width', '30');
-    table.setAttribute('border', '0');
-    table.setAttribute('summary', 'Privly Visual Security Glyph');
+    var cellSize = Math.floor(size / 5);
+    var realSize = cellSize * 5;
+    var offset = Math.floor((size - realSize) / 2);
 
-    var tbody = document.createElement('tbody');
-    var i, j, tr, td, nbs;
+    var canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    var ctx = canvas.getContext('2d');
+
+    // draw background
+    ctx.fillStyle = '#FFF';
+    ctx.fillRect(0, 0, size, size);
+
+    // draw pattern
+    ctx.fillStyle = '#' + glyph.color;
+
+    var i, j;
 
     for (i = 0; i < 5; i++) {
-      tr = document.createElement('tr');
       for (j = 0; j < 5; j++) {
-        td = document.createElement('td');
-
-        // Add a non-breaking space
-        nbs = document.createTextNode('\u00A0');
-        td.appendChild(nbs);
-
-        // Fill only the first three columns with the coresponding values from glyphArray[]
+        // Fill only the first three columns with the coresponding values from glyph.cells[]
         // The rest of two columns are simetrical to the first two
         if (j <= 2) {
           if (glyph.cells[i * 3 + j]) {
-            td.setAttribute('class', 'glyph_fill');
-            td.setAttribute('style', 'background-color:#' + glyph.color);
-          } else {
-            td.setAttribute('class', 'glyph_empty');
+            ctx.fillRect(offset + j * cellSize, offset + i * cellSize, cellSize, cellSize);
           }
         } else {
           if (glyph.cells[i * 3 + (5 % (j + 1))]) {
-            td.setAttribute('class', 'glyph_fill');
-            td.setAttribute('style', 'background-color:#' + glyph.color);
-          } else {
-            td.setAttribute('class', 'glyph_empty');
+            ctx.fillRect(offset + j * cellSize, offset + i * cellSize, cellSize, cellSize);
           }
         }
-        tr.appendChild(td);
       }
-      tbody.appendChild(tr);
     }
 
-    table.appendChild(tbody);
-    return table;
+    return canvas;
   };
 
 }());
